@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '2';
+const APP_VERSION = '3 (количество)';
 /*
   Список покупок. Данные общие для всех телефонов: хранятся в Google Таблице (через скрипт Google).
   Телефон держит копию (работает без интернета) и очередь неотправленных действий.
@@ -30,8 +30,9 @@ function applyOps(st, list) {
   const s = JSON.parse(JSON.stringify(st));
   for (const o of list) {
     if (o.t === 'add') {
-      if (s.catalog.some(p => p.id === o.pid) && !s.list.some(i => i.pid === o.pid)) s.list.push({pid: o.pid, checked: false});
-    } else if (o.t === 'rm') s.list = s.list.filter(i => i.pid !== o.pid);
+      if (s.catalog.some(p => p.id === o.pid) && !s.list.some(i => i.pid === o.pid)) s.list.push({pid: o.pid, checked: false, qty: String(o.q || '').slice(0, 20)});
+    } else if (o.t === 'qty') { const i = s.list.find(i => i.pid === o.pid); if (i) i.qty = String(o.q || '').slice(0, 20); }
+    else if (o.t === 'rm') s.list = s.list.filter(i => i.pid !== o.pid);
     else if (o.t === 'chk') { const i = s.list.find(i => i.pid === o.pid); if (i) i.checked = !!o.v; }
     else if (o.t === 'prod_add') { if (!s.catalog.some(p => p.id === o.id)) s.catalog.push({id: o.id, cat: o.cat, name: o.name}); }
     else if (o.t === 'prod_ren') { const p = s.catalog.find(p => p.id === o.id); if (p) { if (o.name) p.name = o.name; if (o.cat) p.cat = o.cat; } }
@@ -202,16 +203,24 @@ function renderList() {
   const b = $('#badge'); b.textContent = left; b.classList.toggle('hidden', !left);
 }
 function rowHtml(i, done) {
+  const q = i.qty ? esc(i.qty) : '';
   return `<div class="row-item${done ? ' done' : ''}" data-pid="${esc(i.pid)}"><span class="box"></span><span class="nm">${esc(i.p.name)}</span>` +
-    (done ? '' : '<button class="x" data-rm aria-label="Убрать">×</button>') + '</div>';
+    (done ? (q ? `<span class="qty">${q}</span>` : '') : `<button class="qty${q ? '' : ' empty'}" data-qty aria-label="Количество">${q || '＋ кол-во'}</button><button class="x" data-rm aria-label="Убрать">×</button>`) + '</div>';
 }
 $('#listBody').onclick = e => {
   const row = e.target.closest('[data-pid]'); if (!row) return;
   const pid = row.dataset.pid;
   if (e.target.closest('[data-rm]')) return act({t: 'rm', pid});
+  if (e.target.closest('[data-qty]')) return askQty(pid);
   const it = view.list.find(i => i.pid === pid);
   if (it) act({t: 'chk', pid, v: !it.checked});
 };
+function askQty(pid) {
+  const it = view.list.find(i => i.pid === pid), p = byId().get(pid); if (!it || !p) return;
+  const v = prompt('Количество для «' + p.name + '»\nНапример: 2, 1 л, 500 г. Пусто — убрать.', it.qty || '');
+  if (v === null) return;
+  act({t: 'qty', pid, q: v.trim().slice(0, 20)});
+}
 $('#btnDone').onclick = () => {
   const checked = view.list.filter(i => i.checked).length;
   const open = view.list.length - checked;
@@ -241,7 +250,7 @@ function renderHistory() {
     for (const it of t.items) {
       let g = groups.find(g => g.cat === it.cat);
       if (!g) groups.push(g = {cat: it.cat, names: []});
-      g.names.push(it.name);
+      g.names.push(it.name + (it.qty ? ' (' + it.qty + ')' : ''));
     }
     return `<div class="trip"><div class="th">${esc(t.date)} ${esc(t.time)} · ${t.items.length} шт.</div>` +
       groups.map(g => `<div class="tc"><b>${esc(g.cat)}:</b> ${esc(g.names.join(', '))}</div>`).join('') +
@@ -255,7 +264,7 @@ $('#histBody').onclick = e => {
   for (const it of t.items) {
     const p = view.catalog.find(p => p.cat === it.cat && p.name === it.name);
     if (!p) { missing++; continue; }
-    if (!view.list.some(i => i.pid === p.id)) { act({t: 'add', pid: p.id}); added++; }
+    if (!view.list.some(i => i.pid === p.id)) { act({t: 'add', pid: p.id, q: it.qty || ''}); added++; }
   }
   toast(`Добавлено в список: ${added}` + (missing ? `; нет в каталоге: ${missing}` : ''));
 };

@@ -1,5 +1,5 @@
 // Service worker: кэширует приложение, чтобы оно открывалось без интернета.
-const CACHE = 'shop-v2';
+const CACHE = 'shop-v3';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.json', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
