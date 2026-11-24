@@ -70,3 +70,6 @@ input,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-
 .hint{color:var(--muted);font-size:.85rem}
 hr{border:0;border-top:1px solid var(--line);margin:14px 0}
 .toast{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%);background:#111827;color:#fff;padding:10px 16px;border-radius:12px;max-width:90%;z-index:20;text-align:center}
+
+/* Поиск и кнопка «Правка» всегда на виду при прокрутке продуктов */
+#v-pick > .bar:first-child{position:sticky;top:-10px;z-index:5;background:var(--bg);margin:-10px -12px 10px;padding:10px 12px;border-bottom:1px solid var(--line)}
