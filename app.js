@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '3 (количество)';
+const APP_VERSION = '4 (обновление)';
 /*
   Список покупок. Данные общие для всех телефонов: хранятся в Google Таблице (через скрипт Google).
   Телефон держит копию (работает без интернета) и очередь неотправленных действий.
@@ -58,46 +58,68 @@ const byId = () => new Map(view.catalog.map(p => [p.id, p]));
 
 /* ---------- синхронизация ---------- */
 let syncing = false, syncTimer = null;
-async function api(method, params, body) {
+const NET_TIMEOUT_MS = 20000;   // запрос дольше этого времени считается зависшим
+async function api(method, params, body, signal) {
   if (!cfg.url) throw new Error('не указан адрес скрипта');
   let r;
   if (method === 'GET') {
     const u = new URL(cfg.url);
     u.searchParams.set('token', cfg.token);
     for (const k in params) u.searchParams.set(k, params[k]);
-    r = await fetch(u.toString());
+    r = await fetch(u.toString(), {signal});
   } else {
-    r = await fetch(cfg.url, {method: 'POST', body: JSON.stringify(Object.assign({token: cfg.token}, body))});
+    r = await fetch(cfg.url, {method: 'POST', body: JSON.stringify(Object.assign({token: cfg.token}, body)), signal});
   }
   const j = await r.json();
   if (!j.ok) throw new Error(j.error === 'bad token' ? 'неверный пароль' : (j.error || 'ошибка сервера'));
   return j;
 }
 function scheduleSync(ms = 300) { clearTimeout(syncTimer); syncTimer = setTimeout(sync, ms); }
-async function sync() {
-  if (syncing || !cfg.url) { updateNet(); return; }
+let syncRun = 0, syncCtl = null, lastOk = 0;
+/* force=true: прервать зависший запрос и начать заново. Возвращает true, если связь с таблицей есть. */
+async function sync(force = false) {
+  if (!cfg.url) { updateNet(); return false; }
+  if (syncing && !force) return false;
+  if (syncing && syncCtl) { try { syncCtl.abort(); } catch (e) {} }
+  const run = ++syncRun;
   syncing = true;
+  const ctl = new AbortController(); syncCtl = ctl;
+  const timer = setTimeout(() => ctl.abort(), NET_TIMEOUT_MS);
+  let ok = false;
   try {
     const sent = ops.slice();
-    const j = sent.length ? await api('POST', {}, {ops: sent}) : await api('GET', {});
+    const j = sent.length ? await api('POST', {}, {ops: sent}, ctl.signal) : await api('GET', {}, null, ctl.signal);
     ops = ops.slice(sent.length); lsSet(K.ops, ops);
     const next = {catalog: j.catalog, list: j.list};
     const changed = JSON.stringify(next) !== JSON.stringify(snap);
     snap = next; lsSet(K.snap, snap);
-    netState = 'ok'; netMsg = '';
+    netState = 'ok'; netMsg = ''; lastOk = Date.now(); ok = true;
     if (changed || sent.length) { recompute(); render(); }
   } catch (e) {
-    netState = 'err'; netMsg = e.message;
-  } finally { syncing = false; updateNet(); }
-  if (ops.length && netState === 'ok') scheduleSync(100);
+    if (run === syncRun) { netState = 'err'; netMsg = e.name === 'AbortError' ? 'нет ответа от сервера' : e.message; }
+  } finally {
+    clearTimeout(timer);
+    if (run === syncRun) { syncing = false; syncCtl = null; }
+    updateNet();
+  }
+  if (ok && ops.length) scheduleSync(100);
+  return ok;
 }
+const hhmm = t => { const d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
 function updateNet() {
-  const dot = $('#dot');
-  if (!cfg.url) { dot.className = 'dot err'; $('#syncTxt').textContent = 'не настроено'; return; }
-  if (netState === 'err') { dot.className = 'dot err'; $('#syncTxt').textContent = ops.length ? `не отправлено: ${ops.length}` : 'нет связи'; return; }
-  dot.className = 'dot' + (ops.length ? ' wait' : '');
-  $('#syncTxt').textContent = ops.length ? 'отправка…' : 'синхронизировано';
+  const dot = $('#dot'), txt = $('#syncTxt');
+  if (!cfg.url) { dot.className = 'dot err'; txt.textContent = 'не настроено'; return; }
+  if (netState === 'err') { dot.className = 'dot err'; txt.textContent = (ops.length ? `не отправлено: ${ops.length}` : 'нет связи') + (lastOk ? ` · данные от ${hhmm(lastOk)}` : ''); return; }
+  const stale = lastOk && Date.now() - lastOk > 45000;   // давно не обновлялось
+  dot.className = 'dot' + (ops.length || stale ? ' wait' : '');
+  txt.textContent = ops.length ? 'отправка…' : (lastOk ? 'обновлено ' + hhmm(lastOk) : 'синхронизация…');
 }
+$('#btnRefresh').onclick = async () => {
+  const b = $('#btnRefresh'); b.classList.add('spin');
+  const ok = await sync(true);
+  b.classList.remove('spin');
+  toast(ok ? 'Обновлено ' + hhmm(Date.now()) : 'Не удалось обновить: ' + (netMsg || 'нет связи'), ok ? 2000 : 5000);
+};
 function act(o) {
   ops.push(o); lsSet(K.ops, ops);
   recompute(); render(); updateNet(); scheduleSync();
@@ -316,7 +338,8 @@ async function keepAwake() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') { if (ui.tab === 'list') keepAwake(); sync(); }
 });
-window.addEventListener('online', () => sync());
+window.addEventListener('online', () => sync(true));
+window.addEventListener('focus', () => sync());
 window.addEventListener('offline', () => { netState = 'err'; updateNet(); });
 
 /* ---------- старт ---------- */
@@ -328,4 +351,5 @@ window.addEventListener('offline', () => { netState = 'err'; updateNet(); });
   if (!cfg.url) openSettings();
   sync();
   setInterval(() => { if (document.visibilityState === 'visible') sync(); }, 7000);
+  setInterval(updateNet, 10000);
 })();
