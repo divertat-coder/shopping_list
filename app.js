@@ -1,5 +1,5 @@
 'use strict';
-const APP_VERSION = '4 (обновление)';
+const APP_VERSION = '5 (уведомления)';
 /*
   Список покупок. Данные общие для всех телефонов: хранятся в Google Таблице (через скрипт Google).
   Телефон держит копию (работает без интернета) и очередь неотправленных действий.
@@ -17,7 +17,7 @@ const K = {cfg: 'shop_cfg_v1', snap: 'shop_snap_v1', ops: 'shop_ops_v1', ui: 'sh
 function lsGet(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
 function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 
-let cfg = Object.assign({url: '', token: ''}, lsGet(K.cfg, {}));
+let cfg = Object.assign({url: '', token: '', name: ''}, lsGet(K.cfg, {}));
 let snap = lsGet(K.snap, {catalog: [], list: []});   // последнее состояние с сервера
 let ops = lsGet(K.ops, []);                           // действия, ещё не отправленные на сервер
 let ui = Object.assign({tab: 'pick', closed: {}, edit: false}, lsGet(K.ui, {}));
@@ -121,6 +121,7 @@ $('#btnRefresh').onclick = async () => {
   toast(ok ? 'Обновлено ' + hhmm(Date.now()) : 'Не удалось обновить: ' + (netMsg || 'нет связи'), ok ? 2000 : 5000);
 };
 function act(o) {
+  if (o.t === 'add' && cfg.name) o.by = cfg.name.slice(0, 20);
   ops.push(o); lsSet(K.ops, ops);
   recompute(); render(); updateNet(); scheduleSync();
 }
@@ -296,7 +297,7 @@ function render() { renderPick(); renderList(); }
 
 /* ---------- настройки ---------- */
 function openSettings() {
-  $('#sUrl').value = cfg.url; $('#sToken').value = cfg.token;
+  $('#sUrl').value = cfg.url; $('#sToken').value = cfg.token; $('#sName').value = cfg.name || '';
   $('#ver').textContent = 'Версия приложения: ' + APP_VERSION;
   $('#sLinkOut').classList.add('hidden');
   $('#settings').classList.remove('hidden');
@@ -304,7 +305,7 @@ function openSettings() {
 $('#btnSettings').onclick = openSettings;
 $('#sClose').onclick = () => $('#settings').classList.add('hidden');
 $('#sSave').onclick = () => {
-  cfg = {url: $('#sUrl').value.trim(), token: $('#sToken').value.trim()};
+  cfg = {url: $('#sUrl').value.trim(), token: $('#sToken').value.trim(), name: $('#sName').value.trim().slice(0, 20)};
   lsSet(K.cfg, cfg);
   $('#settings').classList.add('hidden');
   toast('Настройки сохранены'); sync();
@@ -319,7 +320,7 @@ function readHashConfig() {
   if (!location.hash || location.hash.length < 3) return;
   const p = new URLSearchParams(location.hash.slice(1));
   if (p.get('u') && p.get('t')) {
-    cfg = {url: p.get('u'), token: p.get('t')}; lsSet(K.cfg, cfg);
+    cfg = {url: p.get('u'), token: p.get('t'), name: cfg.name || ''}; lsSet(K.cfg, cfg);
     history.replaceState(null, '', location.pathname + location.search);
     toast('Приложение настроено');
   }
